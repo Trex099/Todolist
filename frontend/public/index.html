@@ -13,17 +13,22 @@
         <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
         <!-- Initialize Firebase -->
         <script>
-            // Your Firebase configuration - replace with your actual project values
+            // Firebase configuration from your Firebase console
             const firebaseConfig = {
-                apiKey: "AIzaSyCcGBEx0k5cLUzBILQoD1-X2TFOa-nTxGs",
-                authDomain: "todolist-b20ce.firebaseapp.com",
-                projectId: "todolist-b20ce",
-                storageBucket: "todolist-b20ce.appspot.com", 
-                messagingSenderId: "750204760327",
-                appId: "1:750204760327:web:f9937068369b6d502fe02d"
+                apiKey: "AIzaSyBaoqHtlrMIyAfWmcH1Hh9R948eqicrTEI",
+                authDomain: "todo-a124a.firebaseapp.com",
+                projectId: "todo-a124a",
+                storageBucket: "todo-a124a.firebasestorage.app",
+                messagingSenderId: "1077354135346",
+                appId: "1:1077354135346:web:c0161f4de22ad39df7612b",
+                measurementId: "G-QJCJCCWPXQ"
             };
+            
             // Initialize Firebase
             firebase.initializeApp(firebaseConfig);
+            
+            // Debug Firebase initialization
+            console.log("Firebase initialized in index.html");
         </script>
         <!--
       manifest.json provides metadata used when your web app is installed on a
@@ -53,5 +58,17 @@
       To begin the development, run `npm start` or `yarn start`.
       To create a production bundle, use `npm run build` or `yarn build`.
     -->
+    
+        <!-- Firebase initialization test script -->
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                if (window.firebase) {
+                    console.log('✅ Firebase SDK loaded correctly');
+                    console.log('✅ Firebase Auth available:', !!firebase.auth());
+                } else {
+                    console.error('❌ Firebase SDK not loaded');
+                }
+            });
+        </script>
     </body>
 </html>
