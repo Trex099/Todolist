@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Global variables to maintain state between serverless invocations
@@ -20,111 +20,114 @@ IS_VERCEL = os.environ.get('VERCEL') == '1'
 
 # Initialize Firebase Admin
 def initialize_firebase():
-    global _firestore_client
-    global _firebase_app
-    
-    # Return existing client if already initialized
+    global _firestore_client, _firebase_app
+    logger.debug("Attempting to initialize Firebase...")
+
     if _firestore_client:
-        logger.info("Reusing existing Firestore client")
+        logger.debug("Reusing existing Firestore client.")
         return _firestore_client
-    
+
+    logger.debug(f"Firebase app already initialized: {bool(firebase_admin._apps)}")
+    if firebase_admin._apps:
+        logger.debug(f"Getting existing Firebase app: {firebase_admin._apps[0].name}")
+        _firebase_app = firebase_admin.get_app()
+        _firestore_client = firestore.client(_firebase_app)
+        logger.debug("Successfully got Firestore client from existing app.")
+        return _firestore_client
+
     try:
-        # Prepare credentials
         cred = None
-        cred_source = None
-        
-        # Strategy 1: Use embedded credentials in Vercel environment variables
+        cred_source = "Unknown"
+        logger.debug(f"IS_VERCEL environment: {IS_VERCEL}")
+
         if IS_VERCEL:
-            logger.info("Running in Vercel environment")
-            if os.environ.get("FIREBASE_SERVICE_ACCOUNT"):
+            logger.debug("Attempting Vercel FIREBASE_SERVICE_ACCOUNT strategy.")
+            firebase_service_account_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+            if firebase_service_account_json:
                 try:
-                    cred_dict = json.loads(os.environ.get("FIREBASE_SERVICE_ACCOUNT"))
+                    cred_dict = json.loads(firebase_service_account_json)
                     cred = credentials.Certificate(cred_dict)
-                    cred_source = "FIREBASE_SERVICE_ACCOUNT environment variable"
-                    logger.info(f"Using Firebase credentials from {cred_source}")
+                    cred_source = "FIREBASE_SERVICE_ACCOUNT env var"
+                    logger.info(f"Successfully parsed credentials from {cred_source}")
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse FIREBASE_SERVICE_ACCOUNT: {e}")
-        
-        # Strategy 2: Check for service account file in the current directory
+                    logger.error(f"JSONDecodeError parsing FIREBASE_SERVICE_ACCOUNT: {e}. Content preview: {firebase_service_account_json[:100]}...", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Exception parsing FIREBASE_SERVICE_ACCOUNT: {e}", exc_info=True)
+            else:
+                logger.warning("FIREBASE_SERVICE_ACCOUNT env var not found in Vercel.")
+
         if not cred:
-            try:
-                # In a serverless environment, the working directory should contain our code
-                creds_file = Path(__file__).parent / "firebase-credentials.json"
-                if creds_file.exists():
+            logger.debug("Attempting local firebase-credentials.json strategy.")
+            creds_file = Path(__file__).parent / "firebase-credentials.json"
+            if creds_file.exists():
+                try:
                     cred = credentials.Certificate(str(creds_file))
-                    cred_source = str(creds_file)
-                    logger.info(f"Using Firebase credentials from {cred_source}")
-            except Exception as e:
-                logger.error(f"Error loading credentials file: {e}")
-        
-        # Strategy 3: Look in parent directories (for local development)
+                    cred_source = f"local file: {creds_file}"
+                    logger.info(f"Successfully loaded credentials from {cred_source}")
+                except Exception as e:
+                    logger.error(f"Exception loading credentials from {creds_file}: {e}", exc_info=True)
+            else:
+                logger.debug(f"Local credentials file not found: {creds_file}")
+
         if not cred:
-            # Also check for the specific credentials file we saw in the project root
+            logger.debug("Attempting root credentials file strategy.")
             root_creds_file = Path(__file__).parent.parent.parent / "todo-a124a-firebase-adminsdk-fbsvc-cb837ed8d9.json"
             if root_creds_file.exists():
                 try:
                     cred = credentials.Certificate(str(root_creds_file))
-                    cred_source = str(root_creds_file)
-                    logger.info(f"Using Firebase credentials from {cred_source}")
+                    cred_source = f"root file: {root_creds_file}"
+                    logger.info(f"Successfully loaded credentials from {cred_source}")
                 except Exception as e:
-                    logger.error(f"Failed to load credentials from {root_creds_file}: {e}")
-            
-            # Look in parent directories for any firebase json files
-            if not cred:
-                for directory in [
-                    Path(__file__).parent.parent,  # backend
-                    Path(__file__).parent.parent.parent,  # root
-                ]:
-                    for file in directory.glob("*firebase*.json"):
-                        try:
-                            cred = credentials.Certificate(str(file))
-                            cred_source = str(file)
-                            logger.info(f"Using Firebase credentials from {cred_source}")
-                            break
-                        except Exception as e:
-                            logger.error(f"Failed to load credentials from {file}: {e}")
-                    if cred:
-                        break
-        
-        # Strategy 4: Use GOOGLE_APPLICATION_CREDENTIALS
-        if not cred and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-            try:
-                path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                cred = credentials.Certificate(path)
-                cred_source = f"GOOGLE_APPLICATION_CREDENTIALS ({path})"
-                logger.info(f"Using Firebase credentials from {cred_source}")
-            except Exception as e:
-                logger.error(f"Failed to load credentials from GOOGLE_APPLICATION_CREDENTIALS: {e}")
-        
-        # Initialize app only if we have credentials
-        if cred:
-            # Check if Firebase app is already initialized
-            if not firebase_admin._apps:
-                logger.info(f"Initializing new Firebase app with credentials from {cred_source}")
-                _firebase_app = firebase_admin.initialize_app(cred)
+                    logger.error(f"Exception loading credentials from {root_creds_file}: {e}", exc_info=True)
             else:
-                logger.info("Firebase app already initialized")
-                _firebase_app = firebase_admin.get_app()
+                logger.debug(f"Root credentials file not found: {root_creds_file}")
+        
+        if not cred and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+            gac_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            logger.debug(f"Attempting GOOGLE_APPLICATION_CREDENTIALS strategy: {gac_path}")
+            try:
+                cred = credentials.Certificate(gac_path)
+                cred_source = f"GOOGLE_APPLICATION_CREDENTIALS ({gac_path})"
+                logger.info(f"Successfully loaded credentials from {cred_source}")
+            except Exception as e:
+                logger.error(f"Exception loading credentials from GOOGLE_APPLICATION_CREDENTIALS ({gac_path}): {e}", exc_info=True)
+
+        if cred:
+            logger.info(f"Initializing Firebase app with credentials from: {cred_source}")
+            try:
+                _firebase_app = firebase_admin.initialize_app(cred)
+                logger.info(f"Firebase app '{_firebase_app.name}' initialized successfully.")
+            except Exception as e:
+                logger.error(f"Failed to initialize Firebase app with {cred_source}: {e}", exc_info=True)
+                raise RuntimeError(f"Firebase app initialization failed with {cred_source}: {str(e)}")
             
-            # Get and cache Firestore client
-            _firestore_client = firestore.client(_firebase_app)
-            logger.info("Successfully initialized Firestore client")
+            try:
+                _firestore_client = firestore.client(_firebase_app)
+                logger.info("Firestore client obtained successfully.")
+            except Exception as e:
+                logger.error(f"Failed to get Firestore client: {e}", exc_info=True)
+                raise RuntimeError(f"Firestore client creation failed: {str(e)}")
+            
             return _firestore_client
         else:
-            raise ValueError("No Firebase credentials found")
-    
+            logger.error("No Firebase credentials found after checking all strategies.")
+            raise ValueError("No Firebase credentials found. Ensure FIREBASE_SERVICE_ACCOUNT (JSON content) or a credentials file is correctly set up.")
+
     except Exception as e:
-        error_detail = traceback.format_exc()
-        logger.error(f"Firebase initialization error: {e}\n{error_detail}")
-        
-        # Reraise with more detailed error message
-        raise RuntimeError(f"Firebase initialization failed: {str(e)}")
+        logger.critical(f"CRITICAL: Firebase initialization failed: {e}\n{traceback.format_exc()}", exc_info=True)
+        raise RuntimeError(f"Firebase initialization failed catastrophically: {str(e)}")
 
 # Function to get Firestore client with detailed error handling
 def get_firestore_client():
+    logger.debug("get_firestore_client called.")
     try:
-        return initialize_firebase()
+        client = initialize_firebase()
+        if client:
+            logger.debug("Successfully returned Firestore client from get_firestore_client.")
+            return client
+        else:
+            logger.error("initialize_firebase returned None, which is unexpected.")
+            raise RuntimeError("Failed to get Firestore client: initialization returned no client.")
     except Exception as e:
-        logger.error(f"Error getting Firestore client: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error in get_firestore_client: {e}", exc_info=True)
         raise 

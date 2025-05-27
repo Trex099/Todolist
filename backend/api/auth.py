@@ -10,78 +10,72 @@ import json
 import os
 import requests
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - set to DEBUG for detailed output
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Initialize Firebase on module load for better performance in serverless
+# Attempt Firebase initialization on module load, but gracefully handle failure
 try:
-    # Force initialization of Firebase by getting the client
-    db = get_firestore_client()
-    logger.info("Firebase initialized successfully in auth.py")
+    logger.debug("Attempting to get Firestore client in auth.py at module load...")
+    db = get_firestore_client() 
+    if db:
+        logger.info("Firebase initialized and Firestore client obtained successfully in auth.py module load.")
+    else:
+        logger.warning("Firestore client was None after get_firestore_client() call in auth.py module load.")
     
-    # Check if we can make an auth call to verify setup
-    test_uid = "test-uid-for-verification"
+    # Minimal auth check
     try:
-        # This will fail with a reasonable error if auth is properly initialized
-        auth.get_user(test_uid)
+        auth.get_user("non-existent-uid-for-init-check") # This should fail with UserNotFoundError
+        logger.info("Firebase Auth seems to be working (get_user test).")
     except auth.UserNotFoundError:
-        # This is good! Auth is working but user doesn't exist
-        logger.info("Firebase Auth verified successfully")
+        logger.info("Firebase Auth UserNotFoundError on test UID is EXPECTED and indicates auth is likely working.")
+    except firebase_admin.exceptions.FirebaseError as fe:
+        logger.error(f"FirebaseError during auth init check: {fe}. This might indicate a problem with the Admin SDK setup.", exc_info=True)
     except Exception as e:
-        # Some other error occurred with auth
-        logger.warning(f"Firebase Auth call failed but not fatally: {e}")
+        logger.error(f"Unexpected error during auth init check: {e}", exc_info=True)
+
 except Exception as e:
-    # Log error but don't crash - we'll handle this in the request handlers
-    logger.error(f"Failed to initialize Firebase in auth.py: {e}")
-    logger.error(traceback.format_exc())
+    logger.error(f"CRITICAL: Failed to initialize Firebase or Firestore in auth.py module load: {e}", exc_info=True)
+    # Not raising here to allow app to start and report errors via API if possible
 
 # Function to safely decode a JWT token without failing on malformation
 def safe_decode_token(token):
-    """Safely decode a JWT token without raising exceptions for format issues"""
+    logger.debug(f"safe_decode_token called for token: {token[:30]}..." if token else "None")
     try:
-        # Basic structure check
-        if not token or len(token.split('.')) != 3:
-            logger.warning("Token is not a valid JWT format (need 3 parts)")
+        if not token or not isinstance(token, str) or len(token.split('.')) != 3:
+            logger.warning(f"Token is not a valid JWT format. Length: {len(token) if token else 'N/A'}, Parts: {len(token.split('.')) if token and isinstance(token, str) else 'N/A'}")
             return None
-            
-        # Try to decode the payload part (middle)
-        payload = token.split('.')[1]
-        # Add padding if needed
-        padding = len(payload) % 4
+        payload_b64 = token.split('.')[1]
+        padding = len(payload_b64) % 4
         if padding:
-            payload += '=' * (4 - padding)
-        
-        try:
-            import base64
-            decoded = json.loads(base64.urlsafe_b64decode(payload).decode('utf-8'))
-            logger.info(f"JWT payload preview: issuer={decoded.get('iss', 'unknown')}, subject={decoded.get('sub', 'unknown')}")
-            return decoded
-        except Exception as e:
-            logger.warning(f"Could not decode JWT payload: {e}")
-            return None
+            payload_b64 += '=' * (4 - padding)
+        import base64
+        decoded_payload = base64.urlsafe_b64decode(payload_b64).decode('utf-8')
+        decoded = json.loads(decoded_payload)
+        logger.debug(f"JWT payload decoded: issuer={decoded.get('iss')}, subject={decoded.get('sub')}, email={decoded.get('email')}")
+        return decoded
     except Exception as e:
-        logger.warning(f"Error during token inspection: {e}")
+        logger.error(f"Could not decode JWT payload: {e}. Token snippet: {token[:30] if token else 'N/A'}...", exc_info=True)
         return None
 
 # Verify a token directly with Google
 def verify_with_google(token):
+    logger.debug(f"verify_with_google called for token: {token[:30]}..." if token else "None")
     try:
-        # Use Google's token info endpoint as a fallback
-        response = requests.get(
-            f"https://oauth2.googleapis.com/tokeninfo?id_token={token}",
-            timeout=5
-        )
-        
+        response = requests.get(f"https://oauth2.googleapis.com/tokeninfo?id_token={token}", timeout=5)
+        logger.debug(f"Google tokeninfo response status: {response.status_code}, content: {response.text[:200]}")
         if response.status_code == 200:
             token_info = response.json()
-            logger.info(f"Token verified with Google: {token_info.get('email', 'unknown')}")
+            logger.info(f"Token successfully verified with Google: email={token_info.get('email')}, sub={token_info.get('sub')}")
             return token_info
         else:
             logger.warning(f"Google token verification failed: {response.status_code} - {response.text}")
             return None
+    except requests.exceptions.Timeout:
+        logger.error("Timeout verifying token with Google.", exc_info=True)
+        return None
     except Exception as e:
-        logger.error(f"Error verifying token with Google: {e}")
+        logger.error(f"Error verifying token with Google: {e}", exc_info=True)
         return None
 
 # Context manager for timing operations
@@ -91,164 +85,104 @@ class TimingContext:
         
     def __enter__(self):
         self.start_time = time.time()
+        logger.debug(f"Starting operation: {self.operation_name}")
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         execution_time = time.time() - self.start_time
-        logger.info(f"{self.operation_name} took {execution_time:.2f} seconds")
+        logger.debug(f"Finished operation: {self.operation_name} in {execution_time:.4f}s. Success: {not exc_type}")
 
 # Verify Firebase ID token with extensive error handling and diagnostics
 async def verify_token(authorization: Optional[str] = Header(None)):
-    # Special debugging logic for Vercel environment
-    IS_VERCEL = os.environ.get('VERCEL') == '1'
-    if IS_VERCEL:
-        logger.info("Running in Vercel environment")
-    
-    # Full request logging in debug mode
-    logger.debug(f"Authorization header received: {authorization[:20]}..." if authorization else "None")
-    
+    logger.debug(f"verify_token called. Authorization header: {authorization[:30] if authorization else 'None'}...")
+    if not firebase_admin._apps:
+        logger.critical("Firebase Admin SDK is NOT INITIALIZED when verify_token is called. This is a SEVERE issue.")
+        # Attempt re-initialization, though this is a band-aid
+        try:
+            get_firestore_client() # This will attempt to initialize
+            logger.info("Re-attempted Firebase initialization from verify_token.")
+            if not firebase_admin._apps:
+                 logger.error("Re-initialization attempt FAILED from verify_token.")
+                 raise HTTPException(status_code=503, detail="Firebase Admin SDK not initialized. Please try again later.")
+        except Exception as reinit_e:
+            logger.error(f"Error during re-initialization attempt: {reinit_e}", exc_info=True)
+            raise HTTPException(status_code=503, detail="Firebase Admin SDK failed to initialize. Please try again later.")
+
     if not authorization:
         logger.warning("Authorization header missing")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing",
-        )
-    
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization header missing")
+
+    token = None
     try:
-        with TimingContext("Token verification"):
-            # Extract the token from the Authorization header
-            token = None
+        with TimingContext("Token extraction and initial validation"):
             if " " in authorization:
                 scheme, token = authorization.split(" ", 1)
                 if scheme.lower() != "bearer":
-                    logger.warning(f"Invalid authentication scheme: {scheme}")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid authentication scheme, expected 'Bearer'",
-                    )
+                    logger.warning(f"Invalid authentication scheme: {scheme}. Expected 'Bearer'.")
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication scheme, expected 'Bearer'")
             else:
                 token = authorization
-                logger.info("Authorization header provided without scheme, assuming Bearer")
-                
-            # Check token format
-            if not token or token == "null" or token == "undefined":
-                logger.warning("Token is null, undefined, or empty")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED, 
-                    detail="Invalid token: token is null or undefined"
-                )
-                
-            # Do basic token inspection for debugging
-            token_data = safe_decode_token(token)
-            if token_data:
-                logger.info(f"Token looks like a valid JWT, issued for: {token_data.get('email', 'unknown')}")
-            else:
-                logger.warning("Token does not appear to be a valid JWT")
+                logger.debug("Authorization header provided without scheme, assuming Bearer token.")
+
+            if not token or token.lower() == "null" or token.lower() == "undefined":
+                logger.warning(f"Token is null, undefined, or empty: '{token}'")
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: token is null, undefined or empty")
             
-            # Verify the token
+            logger.debug(f"Token extracted for verification: {token[:30]}...")
+            token_data_preview = safe_decode_token(token)
+            if not token_data_preview:
+                logger.warning("Token could not be safely decoded (preview). This often indicates a malformed token.")
+                # Don't raise yet, let verify_id_token handle it or Google fallback
+
+        with TimingContext("Firebase Auth verify_id_token"):
             try:
-                # Verify with Firebase Auth
                 decoded_token = auth.verify_id_token(token)
-                
-                # Log successful verification
                 user_email = decoded_token.get("email", "unknown")
                 user_id = decoded_token.get("uid", "unknown")
-                logger.info(f"Successfully verified token for user: {user_email} (ID: {user_id})")
+                logger.info(f"Successfully verified token with Firebase SDK for user: {user_email} (ID: {user_id})")
+                if not user_id or user_id == "unknown":
+                    logger.error("Token verified by Firebase SDK but UID is missing or invalid.")
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: UID missing after Firebase verification")
+                return {"uid": user_id, "email": user_email, "name": decoded_token.get("name", ""), "picture": decoded_token.get("picture", "")}
+            except firebase_admin.exceptions.FirebaseError as fe:
+                 # Broad catch for Firebase specific errors for better logging
+                logger.error(f"FirebaseError during verify_id_token: {type(fe).__name__} - {fe}. Token: {token[:30]}...", exc_info=True)
+                # Specific handling for common Firebase auth errors
+                if isinstance(fe, auth.InvalidIdTokenError):
+                    detail = f"Invalid ID token: {str(fe)} / Check token signature and project ID."
+                elif isinstance(fe, auth.ExpiredIdTokenError):
+                    detail = "Firebase ID token has expired. Please login again."
+                elif isinstance(fe, auth.RevokedIdTokenError):
+                    detail = "Firebase ID token has been revoked."
+                elif isinstance(fe, auth.CertificateFetchError):
+                    detail = "Could not fetch Firebase public keys. Check network or Firebase status."
+                else:
+                    detail = f"Firebase authentication error: {str(fe)}"
                 
-                # Ensure we have at least a UID
-                if not decoded_token.get("uid"):
-                    logger.error("Token verified but no UID found in decoded token")
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid token: missing user ID",
-                    )
-                
-                return {
-                    "uid": decoded_token["uid"],
-                    "email": decoded_token.get("email", ""),
-                    "name": decoded_token.get("name", ""),
-                    "picture": decoded_token.get("picture", "")
-                }
-            except ValueError as e:
-                logger.error(f"Invalid token format: {e}")
-                # Try fallback verification with Google
+                logger.info("Attempting Google fallback due to Firebase SDK verification failure.")
                 google_info = verify_with_google(token)
                 if google_info and google_info.get('sub'):
                     logger.info(f"Successfully verified with Google fallback: {google_info.get('email')}")
-                    return {
-                        "uid": google_info.get('sub'),
-                        "email": google_info.get('email', ''),
-                        "name": google_info.get('name', ''),
-                        "picture": google_info.get('picture', '')
-                    }
-                
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Invalid token format: {str(e)}",
-                )
-            except auth.InvalidIdTokenError as e:
-                logger.error(f"Invalid ID token: {e}")
-                # Try fallback verification with Google
-                google_info = verify_with_google(token)
-                if google_info and google_info.get('sub'):
-                    logger.info(f"Successfully verified with Google fallback: {google_info.get('email')}")
-                    return {
-                        "uid": google_info.get('sub'),
-                        "email": google_info.get('email', ''),
-                        "name": google_info.get('name', ''),
-                        "picture": google_info.get('picture', '')
-                    }
-                    
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Invalid ID token: {str(e)}",
-                )
-            except auth.ExpiredIdTokenError:
-                logger.error("Firebase ID token has expired")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Firebase ID token has expired. Please login again.",
-                )
-            except auth.RevokedIdTokenError:
-                logger.error("Firebase ID token has been revoked")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Firebase ID token has been revoked",
-                )
-            except auth.CertificateFetchError as e:
-                logger.error(f"Failed to fetch certificates: {e}")
-                # Try fallback verification with Google
-                google_info = verify_with_google(token)
-                if google_info and google_info.get('sub'):
-                    logger.info(f"Successfully verified with Google fallback: {google_info.get('email')}")
-                    return {
-                        "uid": google_info.get('sub'),
-                        "email": google_info.get('email', ''),
-                        "name": google_info.get('name', ''),
-                        "picture": google_info.get('picture', '')
-                    }
-                
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication server temporarily unavailable",
-                )
-    except HTTPException:
+                    return {"uid": google_info.get('sub'), "email": google_info.get('email', ''), "name": google_info.get('name', ''), "picture": google_info.get('picture', '')}
+                else:
+                    logger.warning("Google fallback also failed or returned no user info.")
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail) # Raise with original Firebase detail
+            except ValueError as ve:
+                # ValueError can be raised for non-string tokens or other issues before Firebase SDK calls
+                logger.error(f"ValueError during token processing (possibly before Firebase SDK): {ve}. Token: {token[:30]}...", exc_info=True)
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token format or value: {str(ve)}")
+
+    except HTTPException: # Re-raise HTTPExceptions directly
         raise
     except Exception as e:
-        error_details = traceback.format_exc()
-        logger.error(f"Authentication error: {e}")
-        logger.error(f"Error details:\n{error_details}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Authentication error: {str(e)}",
-        )
+        logger.critical(f"CRITICAL Unhandled exception in verify_token: {e}. Token: {token[:30] if token else 'N/A'}...", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Critical internal authentication error: {str(e)}")
 
 # Dependency for protected routes
 async def get_current_user(user_data = Depends(verify_token)):
-    if not user_data or "uid" not in user_data:
-        logger.error("User data missing or invalid after token verification")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User authentication failed",
-        )
+    logger.debug(f"get_current_user called with user_data: {user_data}")
+    if not user_data or not isinstance(user_data, dict) or "uid" not in user_data:
+        logger.error(f"User data missing or invalid after token verification. Data: {user_data}")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User authentication failed due to invalid data post-verification")
+    logger.info(f"Current user identified: {user_data.get('email', user_data.get('uid'))}")
     return user_data 
