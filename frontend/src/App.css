@@ -1,38 +1,180 @@
-.App {
-    text-align: center;
+/* Reset and base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #111827;
+  color: #ffffff;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
 }
 
-.App-link {
-    color: #61dafb;
+::-webkit-scrollbar-track {
+  background: #374151;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+::-webkit-scrollbar-thumb {
+  background: #6B7280;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.task-card {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Custom button hover effects */
+.btn-primary {
+  background: linear-gradient(135deg, #3B82F6, #1D4ED8);
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #1D4ED8, #1E40AF);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* Status indicators */
+.status-indicator {
+  position: relative;
+  overflow: hidden;
+}
+
+.status-indicator::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.status-indicator:hover::before {
+  left: 100%;
+}
+
+/* Form input focus effects */
+.form-input:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: #3B82F6;
+}
+
+/* Task priority indicators */
+.priority-high {
+  border-left: 4px solid #EF4444;
+}
+
+.priority-medium {
+  border-left: 4px solid #F59E0B;
+}
+
+.priority-low {
+  border-left: 4px solid #10B981;
+}
+
+/* Responsive design improvements */
+@media (max-width: 768px) {
+  .kanban-board {
+    grid-template-columns: 1fr;
+  }
+  
+  .task-card {
+    margin-bottom: 1rem;
+  }
+}
+
+/* Loading states */
+.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Drag and drop placeholder (for future enhancement) */
+.drag-placeholder {
+  border: 2px dashed #6B7280;
+  background-color: #374151;
+  border-radius: 8px;
+  min-height: 100px;
+}
+
+/* Custom modal backdrop */
+.modal-backdrop {
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Success states */
+.success-indicator {
+  background: linear-gradient(135deg, #10B981, #059669);
+  color: white;
+}
+
+/* Error states */
+.error-indicator {
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+  color: white;
+}
+
+/* Enhanced task cards */
+.task-card-enhanced {
+  background: linear-gradient(145deg, #374151, #4B5563);
+  border: 1px solid #6B7280;
+  transition: all 0.3s ease;
+}
+
+.task-card-enhanced:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+  border-color: #9CA3AF;
+}
+
+/* Category specific styles */
+.category-frontend {
+  border-left: 4px solid #8B5CF6;
+}
+
+.category-backend {
+  border-left: 4px solid #F97316;
+}
+
+.category-bugfix {
+  border-left: 4px solid #EF4444;
+}
+
+.category-research {
+  border-left: 4px solid #06B6D4;
 }
