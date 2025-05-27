@@ -27,6 +27,8 @@ chainlit.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # local env files
 # .env*.local
@@ -68,3 +70,23 @@ __pycache__/
 
 # Android SDK
 android-sdk/
+
+# Logs
+logs
+*.log
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Firebase credentials
+*-firebase-adminsdk-*.json
+.env*
+!.env.example
