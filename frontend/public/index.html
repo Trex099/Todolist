@@ -18,17 +18,19 @@
                 apiKey: "AIzaSyBaoqHtlrMIyAfWmcH1Hh9R948eqicrTEI",
                 authDomain: "todo-a124a.firebaseapp.com",
                 projectId: "todo-a124a",
-                storageBucket: "todo-a124a.firebasestorage.app",
+                storageBucket: "todo-a124a.appspot.com",
                 messagingSenderId: "1077354135346",
                 appId: "1:1077354135346:web:c0161f4de22ad39df7612b",
                 measurementId: "G-QJCJCCWPXQ"
             };
             
             // Initialize Firebase
-            firebase.initializeApp(firebaseConfig);
-            
-            // Debug Firebase initialization
-            console.log("Firebase initialized in index.html");
+            try {
+                firebase.initializeApp(firebaseConfig);
+                console.log("Firebase initialized in index.html");
+            } catch (error) {
+                console.error("Error initializing Firebase in index.html:", error);
+            }
         </script>
         <!--
       manifest.json provides metadata used when your web app is installed on a
@@ -65,6 +67,15 @@
                 if (window.firebase) {
                     console.log('✅ Firebase SDK loaded correctly');
                     console.log('✅ Firebase Auth available:', !!firebase.auth());
+                    
+                    // Test auth state
+                    firebase.auth().onAuthStateChanged(function(user) {
+                        if (user) {
+                            console.log('User is signed in via Firebase in index.html');
+                        } else {
+                            console.log('No user is signed in via Firebase in index.html');
+                        }
+                    });
                 } else {
                     console.error('❌ Firebase SDK not loaded');
                 }

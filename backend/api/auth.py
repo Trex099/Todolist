@@ -8,6 +8,7 @@ import traceback
 import time
 import json
 import os
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,11 +48,13 @@ def safe_decode_token(token):
         # Try to decode the payload part (middle)
         payload = token.split('.')[1]
         # Add padding if needed
-        payload += '=' * (-len(payload) % 4)
+        padding = len(payload) % 4
+        if padding:
+            payload += '=' * (4 - padding)
         
         try:
             import base64
-            decoded = json.loads(base64.b64decode(payload).decode('utf-8'))
+            decoded = json.loads(base64.urlsafe_b64decode(payload).decode('utf-8'))
             logger.info(f"JWT payload preview: issuer={decoded.get('iss', 'unknown')}, subject={decoded.get('sub', 'unknown')}")
             return decoded
         except Exception as e:
@@ -59,6 +62,26 @@ def safe_decode_token(token):
             return None
     except Exception as e:
         logger.warning(f"Error during token inspection: {e}")
+        return None
+
+# Verify a token directly with Google
+def verify_with_google(token):
+    try:
+        # Use Google's token info endpoint as a fallback
+        response = requests.get(
+            f"https://oauth2.googleapis.com/tokeninfo?id_token={token}",
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            token_info = response.json()
+            logger.info(f"Token verified with Google: {token_info.get('email', 'unknown')}")
+            return token_info
+        else:
+            logger.warning(f"Google token verification failed: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Error verifying token with Google: {e}")
         return None
 
 # Context manager for timing operations
@@ -107,6 +130,14 @@ async def verify_token(authorization: Optional[str] = Header(None)):
                 token = authorization
                 logger.info("Authorization header provided without scheme, assuming Bearer")
                 
+            # Check token format
+            if not token or token == "null" or token == "undefined":
+                logger.warning("Token is null, undefined, or empty")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, 
+                    detail="Invalid token: token is null or undefined"
+                )
+                
             # Do basic token inspection for debugging
             token_data = safe_decode_token(token)
             if token_data:
@@ -140,12 +171,34 @@ async def verify_token(authorization: Optional[str] = Header(None)):
                 }
             except ValueError as e:
                 logger.error(f"Invalid token format: {e}")
+                # Try fallback verification with Google
+                google_info = verify_with_google(token)
+                if google_info and google_info.get('sub'):
+                    logger.info(f"Successfully verified with Google fallback: {google_info.get('email')}")
+                    return {
+                        "uid": google_info.get('sub'),
+                        "email": google_info.get('email', ''),
+                        "name": google_info.get('name', ''),
+                        "picture": google_info.get('picture', '')
+                    }
+                
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=f"Invalid token format: {str(e)}",
                 )
             except auth.InvalidIdTokenError as e:
                 logger.error(f"Invalid ID token: {e}")
+                # Try fallback verification with Google
+                google_info = verify_with_google(token)
+                if google_info and google_info.get('sub'):
+                    logger.info(f"Successfully verified with Google fallback: {google_info.get('email')}")
+                    return {
+                        "uid": google_info.get('sub'),
+                        "email": google_info.get('email', ''),
+                        "name": google_info.get('name', ''),
+                        "picture": google_info.get('picture', '')
+                    }
+                    
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=f"Invalid ID token: {str(e)}",
@@ -164,6 +217,17 @@ async def verify_token(authorization: Optional[str] = Header(None)):
                 )
             except auth.CertificateFetchError as e:
                 logger.error(f"Failed to fetch certificates: {e}")
+                # Try fallback verification with Google
+                google_info = verify_with_google(token)
+                if google_info and google_info.get('sub'):
+                    logger.info(f"Successfully verified with Google fallback: {google_info.get('email')}")
+                    return {
+                        "uid": google_info.get('sub'),
+                        "email": google_info.get('email', ''),
+                        "name": google_info.get('name', ''),
+                        "picture": google_info.get('picture', '')
+                    }
+                
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Authentication server temporarily unavailable",

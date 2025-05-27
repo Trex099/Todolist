@@ -10,6 +10,8 @@ import {
   signOut, 
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail
 } from "firebase/auth";
 
@@ -51,6 +53,7 @@ const initializeAuth = () => {
             auth.onIdTokenChanged(async (user) => {
                 if (user) {
                     try {
+                        console.log("ID token changed, refreshing token");
                         cachedToken = await user.getIdToken();
                         // Get token expiry time from decoded JWT
                         const payload = JSON.parse(atob(cachedToken.split('.')[1]));
@@ -74,6 +77,25 @@ const initializeAuth = () => {
                     }
                 });
             });
+            
+            // Check for redirect result immediately (for Google redirect auth)
+            if (window.firebase && window.firebase.auth) {
+                auth.getRedirectResult().then(result => {
+                    if (result && result.user) {
+                        console.log("Redirect sign-in successful via CDN auth");
+                    }
+                }).catch(error => {
+                    console.error("Redirect sign-in error via CDN auth:", error);
+                });
+            } else {
+                getRedirectResult(auth).then(result => {
+                    if (result && result.user) {
+                        console.log("Redirect sign-in successful via npm auth");
+                    }
+                }).catch(error => {
+                    console.error("Redirect sign-in error via npm auth:", error);
+                });
+            }
         }
     } catch (error) {
         console.error("Error initializing Firebase Auth:", error);
@@ -170,21 +192,56 @@ export const signInWithGoogle = async () => {
         
         // Handle both compat and modular SDKs
         if (window.firebase && window.firebase.auth) {
-            const result = await auth.signInWithPopup(googleProvider);
-            return result.user;
+            console.log("Using window.firebase auth for Google sign in");
+            try {
+                const result = await auth.signInWithPopup(googleProvider);
+                console.log("Google sign-in successful using window.firebase");
+                return result.user;
+            } catch (popupError) {
+                console.error("Popup sign-in error:", popupError);
+                
+                if (popupError.code === 'auth/popup-blocked' || 
+                    popupError.code === 'auth/popup-closed-by-user' || 
+                    popupError.code.includes('popup')) {
+                    console.log("Falling back to redirect sign-in...");
+                    await auth.signInWithRedirect(googleProvider);
+                    console.log("Redirect initiated");
+                    return null; // Redirect will reload the page
+                } else {
+                    throw popupError;
+                }
+            }
         } else {
-            const result = await signInWithPopup(auth, googleProvider);
-            return result.user;
+            console.log("Using npm auth for Google sign in");
+            try {
+                const result = await signInWithPopup(auth, googleProvider);
+                console.log("Google sign-in successful using npm auth");
+                return result.user;
+            } catch (popupError) {
+                console.error("Popup sign-in error:", popupError);
+                
+                if (popupError.code === 'auth/popup-blocked' || 
+                    popupError.code === 'auth/popup-closed-by-user' ||
+                    popupError.code.includes('popup')) {
+                    console.log("Falling back to redirect sign-in...");
+                    await signInWithRedirect(auth, googleProvider);
+                    console.log("Redirect initiated");
+                    return null; // Redirect will reload the page
+                } else {
+                    throw popupError;
+                }
+            }
         }
     } catch (error) {
         console.error('Error signing in with Google:', error);
-        // Check for user canceling the popup
-        if (error.code === 'auth/popup-closed-by-user') {
-            throw new Error('Google sign-in was cancelled. Please try again.');
-        } else if (error.code === 'auth/popup-blocked') {
-            throw new Error('Pop-up was blocked by your browser. Please allow pop-ups for this site.');
+        // Provide user-friendly error message
+        if (error.code === 'auth/unauthorized-domain') {
+            throw new Error('This domain is not authorized for Firebase authentication. Please contact support.');
+        } else if (error.code === 'auth/account-exists-with-different-credential') {
+            throw new Error('An account already exists with the same email but different sign-in credentials.');
+        } else {
+            throw new Error('Failed to sign in with Google. Please try again later.');
         }
-        throw error;
     }
 };
 
@@ -225,6 +282,7 @@ export const getCurrentUser = () => {
 // Get the auth token for API requests with caching for better performance
 export const getAuthToken = async (forceRefresh = false) => {
     if (!auth || !auth.currentUser) {
+        console.log("No user logged in, returning null token");
         cachedToken = null;
         return null;
     }
@@ -234,10 +292,12 @@ export const getAuthToken = async (forceRefresh = false) => {
         
         // Return cached token if it's still valid and refresh not forced
         if (!forceRefresh && cachedToken && tokenExpiry > (now + TOKEN_REFRESH_THRESHOLD)) {
+            console.log("Using cached token");
             return cachedToken;
         }
         
         // Token needs refresh
+        console.log("Getting fresh auth token");
         cachedToken = await auth.currentUser.getIdToken(true);
         
         // Update expiry time by decoding the token
@@ -317,7 +377,9 @@ export const refreshAuthToken = async () => {
     }
     
     try {
+        console.log("Force refreshing auth token");
         cachedToken = await auth.currentUser.getIdToken(true);
+        console.log("Auth token refreshed successfully");
         return cachedToken;
     } catch (error) {
         console.error('Error refreshing auth token:', error);
