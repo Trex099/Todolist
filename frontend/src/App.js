@@ -5,6 +5,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
 import { format, isAfter, isBefore, isToday, addDays, parseISO, isValid } from 'date-fns';
 import './App.css';
+import { fetchTodos, createTodo, updateTodo, deleteTodo } from './services/api';
 
 const App = () => {
   const [tasks, setTasks] = useState([]);
