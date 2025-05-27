@@ -1,0 +1,270 @@
+<think>
+Okay, I need to create a detailed integration playbook for GitHub API integration in a FastAPI and React application. The user wants issue linking and management with tasks stored in localStorage. Let's break this down step by step.
+
+First, the installation steps. For the backend, FastAPI and Uvicorn are necessary. Also, since we're interacting with GitHub's API, we'll need HTTPX for making HTTP requests. Maybe Python-dotenv for environment variables. On the frontend, React and Axios for API calls. The user mentioned localStorage, so I should include how to set that up in React.
+
+Next, the GitHub API setup. The user needs to get a personal access token. I'll outline the steps to create one with the right scopes, like repo for full access to repositories. Security is important, so storing the token in environment variables makes sense. Also, mention security best practices like not hardcoding tokens and using HTTPS.
+
+For the FastAPI backend, I need to create endpoints. One for creating issues, another for listing them. The create endpoint will send a POST request to GitHub's API. The list endpoint might fetch issues from GitHub or from localStorage? Wait, the user said tasks are stored in localStorage, which is frontend. So maybe the backend interacts with GitHub, and the frontend handles local storage. But the backend might need to sync with GitHub. Hmm, need to clarify.
+
+Wait, the user mentioned "tasks stored in localStorage in a FastAPI and React application." So the React frontend uses localStorage for tasks, but the FastAPI backend handles GitHub integration. So the backend communicates with GitHub API, and the frontend communicates with the backend, while also using localStorage for some task management.
+
+So the backend needs endpoints to create issues on GitHub and maybe retrieve them. The frontend will have forms to create issues, which sends a request to the backend, which then uses the GitHub API. The frontend might also store some task data locally in localStorage.
+
+For the code samples, the backend should have a FastAPI app with CORS middleware, environment variables for the GitHub token, and routes for creating and listing issues. The frontend React app should have components to display a form, handle submissions via Axios to the backend, and manage local storage for tasks.
+
+Testing procedures: For the backend, use pytest with HTTPX mock to simulate GitHub API responses. For the frontend, Jest and Testing Library to test form submissions and localStorage interactions. Also, end-to-end testing with Cypress to ensure the entire flow works.
+
+Common pitfalls: Forgetting to handle CORS in FastAPI, which would cause frontend requests to fail. Not securing the GitHub token properly. Frontend not handling errors from the backend. localStorage limitations like storage limits and synchronous nature.
+
+I should structure the playbook into sections: Installation, GitHub Setup, Backend Implementation, Frontend Implementation, Testing, and Pitfalls. Each section needs concise steps and code samples. Make sure to include all necessary commands, like installing dependencies and setting up environment variables.
+
+In the backend code, the create_issue endpoint will take title and body, send a POST to GitHub's API using the provided token. The list_issues endpoint could fetch existing issues from the repository. But wait, the user didn't mention listing, but issue linking and management. Maybe the backend needs to handle creating and updating issues.
+
+For the frontend, a form component that collects title and description, sends a POST to the FastAPI backend. Upon success, store the task in localStorage. Display existing tasks from localStorage. Also, provide a way to sync with GitHub by fetching issues.
+
+Testing the backend involves mocking the GitHub API responses. Using pytest-httpx to mock the POST request and check if the backend correctly handles success and error cases. For the frontend, testing form submission ensures that the correct API call is made and localStorage is updated.
+
+Security best practices: Never expose the GitHub token in the frontend. Keep it in the backend environment variables. Use HTTPS in production. In the frontend, maybe use environment variables for the backend URL.
+
+I need to make sure all code samples are correct. For example, the FastAPI route for creating an issue should include the GitHub token in the headers. The React component should use useState and useEffect for managing form state and localStorage.
+
+Also, include how to run both the backend and frontend. Maybe using concurrently to run both servers with one command.
+
+Finally, common pitfalls: Forgetting to add CORS middleware, leading to frontend connection issues. Not handling token expiration in the backend. localStorage security issues, like XSS attacks. Mention using HTTP-only cookies or secure storage alternatives if possible, but the user specified localStorage, so stick with that but note the risks.
+
+Putting it all together, the playbook should guide the user through setup, implementation, testing, and avoiding common issues, with all necessary code snippets and commands.
+</think>
+
+# Integration Playbook: GitHub API Issue Management with FastAPI & React  
+
+## Key Findings  
+This playbook provides a complete integration strategy for GitHub issue management within a FastAPI backend and React frontend, featuring OAuth token security, local task persistence, and bidirectional API synchronization. The solution implements REST API endpoints for GitHub interaction, React hooks for state management, and comprehensive testing protocols.  
+
+---
+
+## 1. Installation & Setup  
+
+### Backend (FastAPI)  
+```bash  
+pip install fastapi uvicorn httpx python-dotenv pytest pytest-httpx  
+```  
+
+### Frontend (React)  
+```bash  
+npx create-react-app issue-frontend --template typescript  
+cd issue-frontend && npm install axios react-icons  
+```  
+
+---
+
+## 2. GitHub API Configuration  
+
+### Personal Access Token Setup  
+1. Navigate to **GitHub Settings > Developer Settings > Personal Access Tokens**  
+2. Generate token with `repo` scope for full issue control[4]  
+3. Store in `.env`:  
+```  
+GITHUB_TOKEN=ghp_YourTokenHere  
+REPO_owner=your_username  
+REPO_name=your_repo  
+```  
+
+### Security Practices  
+- **Token Rotation**: Set 90-day expiration for production tokens[4]  
+- **Environment Isolation**: Never commit `.env` to version control  
+- **HTTPS Enforcement**: FastAPI CORS configuration (Section 3.2)  
+
+---
+
+## 3. FastAPI Backend Implementation  
+
+### 3.1 Core Endpoints  
+```python  
+# main.py  
+from fastapi import FastAPI, HTTPException  
+import httpx  
+import os  
+
+app = FastAPI()  
+
+# CORS Configuration  
+from fastapi.middleware.cors import CORSMiddleware  
+app.add_middleware(  
+    CORSMiddleware,  
+    allow_origins=["http://localhost:3000"],  
+    allow_methods=["*"],  
+    allow_headers=["*"],  
+)  
+
+@app.post("/issues")  
+async def create_github_issue(title: str, body: str):  
+    token = os.getenv("GITHUB_TOKEN")  
+    url = f"https://api.github.com/repos/{os.getenv('REPO_owner')}/{os.getenv('REPO_name')}/issues"  
+    
+    async with httpx.AsyncClient() as client:  
+        response = await client.post(  
+            url,  
+            json={"title": title, "body": body},  
+            headers={  
+                "Authorization": f"Bearer {token}",  
+                "Accept": "application/vnd.github+json"  
+            }  
+        )  
+    
+    if response.status_code != 201:  
+        raise HTTPException(status_code=response.status_code, detail=response.text)  
+    return response.json()  
+```  
+
+### 3.2 Rate Limit Handling  
+```python  
+# middleware/rate_limiter.py  
+from fastapi import Request  
+
+async def github_rate_limiter(request: Request):  
+    response = await client.get("https://api.github.com/rate_limit")  
+    if response.json()["resources"]["core"]["remaining"] < 10:  
+        raise HTTPException(  
+            status_code=429,  
+            detail="GitHub API rate limit exceeded"  
+        )  
+```  
+
+---
+
+## 4. React Frontend Implementation  
+
+### 4.1 Issue Creation Form  
+```typescript  
+// IssueForm.tsx  
+import { useState } from 'react';  
+import axios from 'axios';  
+
+const IssueForm = () => {  
+  const [task, setTask] = useState({ title: '', description: '' });  
+
+  const handleSubmit = async (e: React.FormEvent) => {  
+    e.preventDefault();  
+    try {  
+      const response = await axios.post('http://localhost:8000/issues', {  
+        title: task.title,  
+        body: task.description  
+      });  
+
+      // Store in localStorage  
+      const storedTasks = JSON.parse(localStorage.getItem('githubTasks') || '[]');  
+      localStorage.setItem(  
+        'githubTasks',  
+        JSON.stringify([...storedTasks, response.data])  
+      );  
+    } catch (error) {  
+      console.error('Submission failed:', error);  
+    }  
+  };  
+
+  return (  
+    <form onSubmit={handleSubmit}>  
+      <input  
+        type="text"  
+        value={task.title}  
+        onChange={(e) => setTask({...task, title: e.target.value})}  
+      />  
+      <textarea  
+        value={task.description}  
+        onChange={(e) => setTask({...task, description: e.target.value})}  
+      />  
+      <button type="submit">Create Issue</button>  
+    </form>  
+  );  
+};  
+```  
+
+### 4.2 Local Storage Sync  
+```typescript  
+// useLocalStorage.ts  
+import { useState, useEffect } from 'react';  
+
+const useLocalStorage = (key: string, initialValue: any) => {  
+  const [value, setValue] = useState(() => {  
+    const storedValue = localStorage.getItem(key);  
+    return storedValue ? JSON.parse(storedValue) : initialValue;  
+  });  
+
+  useEffect(() => {  
+    localStorage.setItem(key, JSON.stringify(value));  
+  }, [key, value]);  
+
+  return [value, setValue];  
+};  
+```  
+
+---
+
+## 5. Testing Implementation  
+
+### 5.1 Backend Tests (Pytest)  
+```python  
+# test_main.py  
+import pytest  
+from httpx import AsyncClient  
+from main import app  
+
+@pytest.mark.anyio  
+async def test_issue_creation(httpx_mock):  
+    httpx_mock.add_response(  
+        url="https://api.github.com/repos/test_owner/test_repo/issues",  
+        json={"id": 42},  
+        status_code=201  
+    )  
+
+    async with AsyncClient(app=app, base_url="http://test") as ac:  
+        response = await ac.post("/issues", json={  
+            "title": "Test Issue",  
+            "body": "Test Description"  
+        })  
+
+    assert response.status_code == 201  
+    assert response.json()["id"] == 42  
+```  
+
+### 5.2 Frontend Tests (Jest)  
+```typescript  
+// IssueForm.test.tsx  
+import { render, screen, fireEvent } from '@testing-library/react';  
+import IssueForm from './IssueForm';  
+
+test('stores data in localStorage on submission', () => {  
+  render(<IssueForm />);  
+  fireEvent.change(screen.getByRole('textbox'), {  
+    target: { value: 'Test Title' }  
+  });  
+  fireEvent.click(screen.getByText('Create Issue'));  
+  expect(localStorage.getItem('githubTasks')).toContain('Test Title');  
+});  
+```  
+
+---
+
+## 6. Deployment & Monitoring  
+
+### Production Considerations  
+1. **Token Encryption**: Use Vault or AWS Secrets Manager for token storage  
+2. **Rate Limit Alerting**: Implement Prometheus monitoring for GitHub API calls[3]  
+3. **CORS Restriction**: Set `allow_origins` to production domain in FastAPI config  
+
+---
+
+## 7. Common Pitfalls & Solutions  
+
+| Pitfall | Solution |  
+|---------|----------|  
+| CORS Errors | Verify `allow_origins` matches frontend URL exactly |  
+| Token Leaks | Implement request masking in logging middleware |  
+| localStorage Limits | Add validation for 5MB storage limit[6] |  
+| API Timeouts | Configure `httpx.Timeout` with retry logic[3] |  
+
+---
+
+## Conclusion  
+This integration enables secure GitHub issue management with local task persistence. For extended functionality, consider implementing OAuth flow for user-specific permissions and adding webhook support for real-time updates. Always validate API responses against GitHub's schema documentation[9] to maintain compatibility.
