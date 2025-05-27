@@ -21,9 +21,23 @@ const apiClient = axios.create({
   timeout: 15000, // Increased timeout for slower connections
 });
 
+// Retry configuration 
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 800; // ms
+let isRefreshingToken = false;
+let tokenRefreshPromise = null;
+
+// Sleep function for retry delay
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Add an interceptor to attach the auth token to every request
 apiClient.interceptors.request.use(async (config) => {
   try {
+    // For requests that don't need auth (like public endpoints)
+    if (config.noAuth) {
+      return config;
+    }
+    
     const token = await getAuthToken();
     if (token) {
       console.log('Adding auth token to request');
@@ -49,7 +63,6 @@ apiClient.interceptors.response.use(
         status: error.response.status,
         statusText: error.response.statusText,
         data: error.response.data,
-        headers: error.response.headers,
         url: error.config.url,
         method: error.config.method
       });
@@ -57,6 +70,46 @@ apiClient.interceptors.response.use(
       // Special handling for 500 errors
       if (error.response.status === 500) {
         console.error('Server error details:', error.response.data);
+      }
+      
+      // Special handling for auth errors
+      if (error.response.status === 401) {
+        if (error.config && !error.config.__isRetryRequest) {
+          // Check if token refresh is in progress
+          const originalRequest = error.config;
+          originalRequest.__isRetryRequest = true;
+          
+          // If token refresh is already in progress, wait for it to complete
+          if (isRefreshingToken) {
+            return tokenRefreshPromise.then(() => {
+              // Try request again with new token
+              return apiClient(originalRequest);
+            }).catch(() => {
+              // If refresh fails, reject the original request
+              return Promise.reject(error);
+            });
+          }
+          
+          // Try to refresh token
+          console.log("Authentication error, attempting to refresh token...");
+          isRefreshingToken = true;
+          tokenRefreshPromise = new Promise((resolve, reject) => {
+            // Implement token refresh logic here if needed
+            // For now just wait a moment then try again as the token might be new
+            setTimeout(() => {
+              isRefreshingToken = false;
+              resolve();
+            }, 1000);
+          });
+          
+          return tokenRefreshPromise.then(() => {
+            // Try request again after token refresh
+            return apiClient(originalRequest);
+          }).catch(() => {
+            // If refresh fails, reject the original request
+            return Promise.reject(error);
+          });
+        }
       }
     } else if (error.request) {
       // The request was made but no response was received
@@ -70,48 +123,76 @@ apiClient.interceptors.response.use(
   }
 );
 
-// Error handling wrapper
-const handleApiRequest = async (apiCall) => {
-  try {
-    return await apiCall();
-  } catch (error) {
-    console.error('API Error:', error);
-    
-    // Handle authentication errors
-    if (error.response && error.response.status === 401) {
-      // You can redirect to login page or trigger a sign-out here
-      console.error('Authentication error: Please log in again');
-    }
-    
-    // Format the error message more clearly for the UI
-    let errorMessage = 'An unknown error occurred';
-    
-    if (error.response) {
-      if (error.response.status === 500) {
-        errorMessage = 'Server error: The application encountered an internal error';
-        
-        // Try to extract more detailed error information
-        if (error.response.data && error.response.data.detail) {
-          errorMessage += ` - ${error.response.data.detail}`;
-        }
-      } else if (error.response.data && error.response.data.detail) {
-        errorMessage = error.response.data.detail;
-      } else {
-        errorMessage = `Error ${error.response.status}: ${error.response.statusText}`;
+// Error handling wrapper with retry logic
+const handleApiRequest = async (apiCall, options = {}) => {
+  const { retries = MAX_RETRIES, retryDelay = RETRY_DELAY, noAuth = false } = options;
+  let lastError = null;
+  
+  // Try the API call with retries
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // If not first attempt, add a delay
+      if (attempt > 0) {
+        await sleep(retryDelay * attempt);
+        console.log(`Retry attempt ${attempt} for API call`);
       }
-    } else if (error.message) {
-      errorMessage = error.message;
       
-      if (error.message.includes('timeout')) {
-        errorMessage = 'Request timed out. Please check your connection and try again.';
+      return await apiCall();
+    } catch (error) {
+      lastError = error;
+      
+      // Don't retry if it's a 4xx error (except for 401 which is handled by the interceptor)
+      if (error.response && error.response.status >= 400 && error.response.status < 500 && error.response.status !== 401) {
+        break;
+      }
+      
+      // Don't retry on last attempt
+      if (attempt === retries) {
+        console.error(`API call failed after ${retries} retries`);
+        break;
       }
     }
-    
-    // Rethrow with better message
-    const enhancedError = new Error(errorMessage);
-    enhancedError.originalError = error;
-    throw enhancedError;
   }
+  
+  // If we get here, all attempts failed
+  console.error('API Error:', lastError);
+  
+  // Handle authentication errors
+  if (lastError.response && lastError.response.status === 401) {
+    // You can redirect to login page or trigger a sign-out here
+    console.error('Authentication error: Please log in again');
+    // Potential redirect to login page
+    // window.location.href = '/login';
+  }
+  
+  // Format the error message more clearly for the UI
+  let errorMessage = 'An unknown error occurred';
+  
+  if (lastError.response) {
+    if (lastError.response.status === 500) {
+      errorMessage = 'Server error: The application encountered an internal error';
+      
+      // Try to extract more detailed error information
+      if (lastError.response.data && lastError.response.data.detail) {
+        errorMessage += ` - ${lastError.response.data.detail}`;
+      }
+    } else if (lastError.response.data && lastError.response.data.detail) {
+      errorMessage = lastError.response.data.detail;
+    } else {
+      errorMessage = `Error ${lastError.response.status}: ${lastError.response.statusText}`;
+    }
+  } else if (lastError.message) {
+    errorMessage = lastError.message;
+    
+    if (lastError.message.includes('timeout')) {
+      errorMessage = 'Request timed out. Please check your connection and try again.';
+    }
+  }
+  
+  // Rethrow with better message
+  const enhancedError = new Error(errorMessage);
+  enhancedError.originalError = lastError;
+  throw enhancedError;
 };
 
 // Authentication API functions

@@ -16,40 +16,103 @@ import {
 // Create variables to hold auth references
 let auth = null;
 let googleProvider = null;
+let authInitialized = false;
+let authStateListeners = [];
 
-// Check if Firebase is already initialized from the CDN in index.html
-try {
-    if (window.firebase && window.firebase.auth) {
-        console.log('Using Firebase from global window object');
-        auth = window.firebase.auth();
-        googleProvider = new window.firebase.auth.GoogleAuthProvider();
-    } else {
+// Token caching for performance
+let cachedToken = null;
+let tokenExpiry = 0;
+const TOKEN_REFRESH_THRESHOLD = 5 * 60 * 1000; // 5 minutes before expiry
+
+// Initialize Firebase Auth
+const initializeAuth = () => {
+    if (authInitialized) return;
+    
+    try {
+        // First try to use Firebase from global window object (CDN)
+        if (window.firebase && window.firebase.auth) {
+            console.log('Using Firebase from global window object');
+            auth = window.firebase.auth();
+            googleProvider = new window.firebase.auth.GoogleAuthProvider();
+            googleProvider.setCustomParameters({ prompt: 'select_account' });
+        } else {
+            // Fall back to npm-based Firebase
+            console.log('Using npm-based Firebase');
+            auth = npmAuth;
+            googleProvider = npmGoogleProvider;
+        }
+        
+        // Test if auth is working
+        if (auth) {
+            console.log('Firebase Auth initialized successfully');
+            authInitialized = true;
+            
+            // Set up token refresh listener
+            auth.onIdTokenChanged(async (user) => {
+                if (user) {
+                    try {
+                        cachedToken = await user.getIdToken();
+                        // Get token expiry time from decoded JWT
+                        const payload = JSON.parse(atob(cachedToken.split('.')[1]));
+                        tokenExpiry = payload.exp * 1000; // Convert to milliseconds
+                        console.log('Token refreshed automatically');
+                    } catch (error) {
+                        console.error('Error refreshing token automatically:', error);
+                        cachedToken = null;
+                    }
+                } else {
+                    cachedToken = null;
+                    tokenExpiry = 0;
+                }
+                
+                // Notify auth state listeners
+                authStateListeners.forEach(listener => {
+                    try {
+                        listener(user);
+                    } catch (error) {
+                        console.error('Error in auth state listener:', error);
+                    }
+                });
+            });
+        }
+    } catch (error) {
+        console.error("Error initializing Firebase Auth:", error);
         // Fall back to npm-based Firebase
-        console.log('Falling back to npm-based Firebase');
+        console.log('Error occurred, falling back to npm-based Firebase');
         auth = npmAuth;
         googleProvider = npmGoogleProvider;
+        
+        // Try again with fallbacks
+        try {
+            authInitialized = true;
+        } catch (fallbackError) {
+            console.error("Failed to initialize Firebase Auth even with fallback:", fallbackError);
+        }
+    }
+};
+
+// Initialize auth on module load
+initializeAuth();
+
+// Helper to ensure auth is initialized
+const ensureAuth = () => {
+    if (!authInitialized) {
+        initializeAuth();
     }
     
-    // Test if auth is working
-    if (auth) {
-        console.log('Firebase Auth initialized successfully');
+    if (!auth) {
+        throw new Error("Firebase Auth could not be initialized");
     }
-} catch (error) {
-    console.error("Error initializing Firebase Auth:", error);
-    // Fall back to npm-based Firebase
-    console.log('Error occurred, falling back to npm-based Firebase');
-    auth = npmAuth;
-    googleProvider = npmGoogleProvider;
-}
+};
 
 // Sign in with email and password
 export const loginWithEmailAndPassword = async (email, password) => {
-    if (!auth) {
-        console.error("Firebase Auth not initialized");
-        throw new Error("Firebase Auth not initialized");
-    }
+    ensureAuth();
     
     try {
+        // Clear any cached token
+        cachedToken = null;
+        
         // Handle both compat and modular SDKs
         if (window.firebase && window.firebase.auth) {
             const userCredential = await auth.signInWithEmailAndPassword(email, password);
@@ -60,18 +123,24 @@ export const loginWithEmailAndPassword = async (email, password) => {
         }
     } catch (error) {
         console.error('Error signing in:', error);
+        // Enhance error messages for better UX
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+            throw new Error('Invalid email or password. Please try again.');
+        } else if (error.code === 'auth/too-many-requests') {
+            throw new Error('Too many failed login attempts. Please try again later or reset your password.');
+        }
         throw error;
     }
 };
 
 // Sign up with email and password
 export const registerWithEmailAndPassword = async (email, password) => {
-    if (!auth) {
-        console.error("Firebase Auth not initialized");
-        throw new Error("Firebase Auth not initialized");
-    }
+    ensureAuth();
     
     try {
+        // Clear any cached token
+        cachedToken = null;
+        
         // Handle both compat and modular SDKs
         if (window.firebase && window.firebase.auth) {
             const userCredential = await auth.createUserWithEmailAndPassword(email, password);
@@ -82,18 +151,23 @@ export const registerWithEmailAndPassword = async (email, password) => {
         }
     } catch (error) {
         console.error('Error registering:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            throw new Error('This email is already in use. Please try signing in instead.');
+        } else if (error.code === 'auth/weak-password') {
+            throw new Error('Password is too weak. Please choose a stronger password.');
+        }
         throw error;
     }
 };
 
 // Sign in with Google
 export const signInWithGoogle = async () => {
-    if (!auth || !googleProvider) {
-        console.error("Firebase Auth not initialized");
-        throw new Error("Firebase Auth not initialized");
-    }
+    ensureAuth();
     
     try {
+        // Clear any cached token
+        cachedToken = null;
+        
         // Handle both compat and modular SDKs
         if (window.firebase && window.firebase.auth) {
             const result = await auth.signInWithPopup(googleProvider);
@@ -104,6 +178,12 @@ export const signInWithGoogle = async () => {
         }
     } catch (error) {
         console.error('Error signing in with Google:', error);
+        // Check for user canceling the popup
+        if (error.code === 'auth/popup-closed-by-user') {
+            throw new Error('Google sign-in was cancelled. Please try again.');
+        } else if (error.code === 'auth/popup-blocked') {
+            throw new Error('Pop-up was blocked by your browser. Please allow pop-ups for this site.');
+        }
         throw error;
     }
 };
@@ -116,6 +196,10 @@ export const logout = async () => {
     }
     
     try {
+        // Clear cached token
+        cachedToken = null;
+        tokenExpiry = 0;
+        
         // Handle both compat and modular SDKs
         if (window.firebase && window.firebase.auth) {
             await auth.signOut();
@@ -131,45 +215,83 @@ export const logout = async () => {
 
 // Get the current authentication state
 export const getCurrentUser = () => {
-    return auth ? auth.currentUser : null;
+    if (!auth) {
+        console.warn("Firebase Auth not initialized when getting current user");
+        return null;
+    }
+    return auth.currentUser;
 };
 
-// Get the auth token for API requests
-export const getAuthToken = async () => {
+// Get the auth token for API requests with caching for better performance
+export const getAuthToken = async (forceRefresh = false) => {
     if (!auth || !auth.currentUser) {
+        cachedToken = null;
         return null;
     }
     
     try {
-        return await auth.currentUser.getIdToken(true);
+        const now = Date.now();
+        
+        // Return cached token if it's still valid and refresh not forced
+        if (!forceRefresh && cachedToken && tokenExpiry > (now + TOKEN_REFRESH_THRESHOLD)) {
+            return cachedToken;
+        }
+        
+        // Token needs refresh
+        cachedToken = await auth.currentUser.getIdToken(true);
+        
+        // Update expiry time by decoding the token
+        try {
+            const payload = JSON.parse(atob(cachedToken.split('.')[1]));
+            tokenExpiry = payload.exp * 1000; // Convert to milliseconds
+        } catch (e) {
+            console.error('Error decoding JWT payload:', e);
+            // Default to 1 hour if we can't decode
+            tokenExpiry = now + 3600 * 1000;
+        }
+        
+        return cachedToken;
     } catch (error) {
         console.error('Error getting auth token:', error);
+        cachedToken = null;
         return null;
     }
 };
 
 // Subscribe to auth state changes
 export const onAuthStateChange = (callback) => {
-    if (!auth) {
-        // If auth is not available, call the callback with null immediately
-        setTimeout(() => callback(null), 0);
-        return () => {}; // Return a no-op unsubscribe function
-    }
+    ensureAuth();
     
-    // Handle both compat and modular SDKs
-    if (window.firebase && window.firebase.auth) {
-        return auth.onAuthStateChanged(callback);
-    } else {
-        return onAuthStateChanged(auth, callback);
+    try {
+        // Add to our custom listeners
+        if (typeof callback === 'function' && !authStateListeners.includes(callback)) {
+            authStateListeners.push(callback);
+        }
+        
+        // Handle both compat and modular SDKs
+        if (window.firebase && window.firebase.auth) {
+            return auth.onAuthStateChanged(callback);
+        } else {
+            return onAuthStateChanged(auth, callback);
+        }
+    } catch (error) {
+        console.error('Error setting up auth state listener:', error);
+        
+        // Fallback: call the callback with null immediately
+        setTimeout(() => callback(null), 0);
+        return () => {
+            // Remove from listeners on unsubscribe
+            const index = authStateListeners.indexOf(callback);
+            if (index !== -1) {
+                authStateListeners.splice(index, 1);
+            }
+        };
     }
 };
 
 // Send password reset email
 export const resetPassword = async (email) => {
-    if (!auth) {
-        console.error("Firebase Auth not initialized");
-        throw new Error("Firebase Auth not initialized");
-    }
+    ensureAuth();
     
     try {
         // Handle both compat and modular SDKs
@@ -181,7 +303,25 @@ export const resetPassword = async (email) => {
         return true;
     } catch (error) {
         console.error('Error sending password reset email:', error);
+        if (error.code === 'auth/user-not-found') {
+            throw new Error('No account found with this email address.');
+        }
         throw error;
+    }
+};
+
+// Force token refresh when needed
+export const refreshAuthToken = async () => {
+    if (!auth || !auth.currentUser) {
+        return null;
+    }
+    
+    try {
+        cachedToken = await auth.currentUser.getIdToken(true);
+        return cachedToken;
+    } catch (error) {
+        console.error('Error refreshing auth token:', error);
+        return null;
     }
 };
 

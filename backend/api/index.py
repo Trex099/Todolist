@@ -1,8 +1,10 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 import os
 import logging
+import traceback
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -44,6 +46,7 @@ async def get_db():
             logger.info("Connected to Firestore")
         except Exception as e:
             logger.error(f"Failed to connect to Firestore: {e}")
+            logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
     return db
 
@@ -105,6 +108,39 @@ def firestore_document_to_dict(doc):
         data['updatedAt'] = datetime.now()
     return data
 
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_id = str(uuid.uuid4())
+    logger.error(f"Unhandled error [{error_id}]: {str(exc)}")
+    logger.error(traceback.format_exc())
+    
+    # Return a structured response with the error ID
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "An unexpected error occurred. Please try again later.",
+            "error_id": error_id
+        }
+    )
+
+# Authentication exception handler
+@app.exception_handler(HTTPException)
+async def auth_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code in (401, 403):
+        logger.warning(f"Authentication error: {exc.detail}")
+        # Return a structured response for auth errors
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": str(exc.detail),
+                "error_type": "authentication_error" if exc.status_code == 401 else "authorization_error"
+            }
+        )
+    
+    # Let FastAPI handle other HTTP exceptions
+    raise exc
+
 # API Routes
 @api_router.get("/")
 async def root():
@@ -133,6 +169,7 @@ async def create_status_check(input: StatusCheckCreate, db=Depends(get_db)):
         return status_obj
     except Exception as e:
         logger.error(f"Error creating status check: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/status", response_model=List[StatusCheck])
@@ -143,6 +180,7 @@ async def get_status_checks(db=Depends(get_db)):
         return [StatusCheck(**firestore_document_to_dict(doc)) for doc in status_checks_ref]
     except Exception as e:
         logger.error(f"Error getting status checks: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 # Protected Todo API endpoints
@@ -170,6 +208,7 @@ async def create_todo(todo: TodoItemCreate, user_data = Depends(get_current_user
         return TodoItem(id=doc.id, **firestore_document_to_dict(doc))
     except Exception as e:
         logger.error(f"Error creating todo: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/todos", response_model=List[TodoItem])
@@ -181,6 +220,7 @@ async def get_todos(user_data = Depends(get_current_user), db=Depends(get_db)):
         return [TodoItem(**firestore_document_to_dict(doc)) for doc in todos_ref]
     except Exception as e:
         logger.error(f"Error getting todos: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/todos/{todo_id}", response_model=TodoItem)
@@ -203,6 +243,7 @@ async def get_todo(todo_id: str, user_data = Depends(get_current_user), db=Depen
         raise
     except Exception as e:
         logger.error(f"Error getting todo {todo_id}: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.put("/todos/{todo_id}", response_model=TodoItem)
@@ -234,6 +275,7 @@ async def update_todo(todo_id: str, todo: TodoItemCreate, user_data = Depends(ge
         raise
     except Exception as e:
         logger.error(f"Error updating todo {todo_id}: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.delete("/todos/{todo_id}")
@@ -258,6 +300,7 @@ async def delete_todo(todo_id: str, user_data = Depends(get_current_user), db=De
         raise
     except Exception as e:
         logger.error(f"Error deleting todo {todo_id}: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 # Include the router in the main app

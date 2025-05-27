@@ -7,12 +7,27 @@
     { "src": "backend/api/index.py", "use": "@vercel/python" }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "backend/api/index.py" },
-    { "src": "/(.*\\.(js|css|ico|jpg|png|svg))", "dest": "frontend/$1" },
+    { 
+      "src": "/api/(.*)", 
+      "dest": "backend/api/index.py",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      }
+    },
+    { 
+      "src": "/(.*\\.(js|css|ico|jpg|png|svg))", 
+      "dest": "frontend/$1",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      }
+    },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "frontend/index.html" }
   ],
   "env": {
-    "PYTHONPATH": "/var/task"
+    "PYTHONPATH": "/var/task",
+    "FIREBASE_PROJECT_ID": "todo-a124a"
   }
 } 
