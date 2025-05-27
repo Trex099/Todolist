@@ -178,3 +178,186 @@ code {
 .category-research {
   border-left: 4px solid #06B6D4;
 }
+
+/* Markdown and Code Syntax Highlighting */
+.prose {
+  color: #e5e7eb;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  color: #f3f4f6;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.prose p {
+  margin-bottom: 1em;
+}
+
+.prose ul, .prose ol {
+  margin-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.prose li {
+  margin-bottom: 0.25em;
+}
+
+.prose blockquote {
+  border-left: 4px solid #6b7280;
+  padding-left: 1em;
+  margin: 1em 0;
+  font-style: italic;
+  color: #d1d5db;
+}
+
+.prose a {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.prose a:hover {
+  color: #93c5fd;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.prose th, .prose td {
+  border: 1px solid #4b5563;
+  padding: 0.5em;
+  text-align: left;
+}
+
+.prose th {
+  background-color: #374151;
+  font-weight: bold;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5em;
+}
+
+/* Code blocks styling */
+.prose pre {
+  background: #1f2937;
+  border-radius: 0.5em;
+  padding: 1em;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.875em;
+}
+
+.prose code {
+  background: #374151;
+  padding: 0.125em 0.25em;
+  border-radius: 0.25em;
+  font-size: 0.875em;
+  color: #f9fafb;
+}
+
+/* Enhanced due date indicators */
+.due-date-indicator {
+  position: relative;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Overdue task styling */
+.task-overdue {
+  border-left: 4px solid #ef4444;
+  background: linear-gradient(135deg, #1f2937, #1e293b);
+}
+
+.task-due-today {
+  border-left: 4px solid #f59e0b;
+  background: linear-gradient(135deg, #1f2937, #1e293b);
+}
+
+/* GitHub link styling */
+.github-link {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  text-decoration: none;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.github-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Enhanced stats cards */
+.stats-card {
+  background: linear-gradient(135deg, #374151, #4b5563);
+  border: 1px solid #6b7280;
+  transition: all 0.3s ease;
+}
+
+.stats-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+}
+
+/* Form enhancements */
+.form-preview-panel {
+  background: linear-gradient(135deg, #111827, #1f2937);
+  border: 2px solid #374151;
+}
+
+/* Sorting indicators */
+.sort-button {
+  background: linear-gradient(135deg, #4b5563, #6b7280);
+  transition: all 0.2s ease;
+}
+
+.sort-button:hover {
+  background: linear-gradient(135deg, #6b7280, #9ca3af);
+  transform: scale(1.05);
+}
+
+/* Task card animations */
+.task-enter {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.task-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms, transform 300ms;
+}
+
+/* Priority indicators with glow effects */
+.priority-high-glow {
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+}
+
+.priority-medium-glow {
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+}
+
+.priority-low-glow {
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
