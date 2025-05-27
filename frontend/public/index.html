@@ -7,9 +7,24 @@
         <meta name="description" content="Todo List Application" />
         <!-- Add Tailwind CSS CDN for reliable styling -->
         <script src="https://cdn.tailwindcss.com"></script>
-        <!-- Add Firebase App CDN -->
+        <!-- Firebase App (the core Firebase SDK) -->
         <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+        <!-- Firebase Auth -->
         <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+        <!-- Initialize Firebase -->
+        <script>
+            // Your Firebase configuration - replace with your actual project values
+            const firebaseConfig = {
+                apiKey: "AIzaSyCcGBEx0k5cLUzBILQoD1-X2TFOa-nTxGs",
+                authDomain: "todolist-b20ce.firebaseapp.com",
+                projectId: "todolist-b20ce",
+                storageBucket: "todolist-b20ce.appspot.com", 
+                messagingSenderId: "750204760327",
+                appId: "1:750204760327:web:f9937068369b6d502fe02d"
+            };
+            // Initialize Firebase
+            firebase.initializeApp(firebaseConfig);
+        </script>
         <!--
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
