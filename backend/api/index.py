@@ -14,6 +14,8 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 
 # Import the Firebase configuration
 from firebase_config import get_firestore_client
+# Import authentication utilities
+from auth import get_current_user
 
 # Create the main app
 app = FastAPI()
@@ -56,6 +58,7 @@ class StatusCheckCreate(BaseModel):
 
 class TodoItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    userId: str  # Added userId field to associate todos with users
     title: str
     category: str
     status: str
@@ -83,6 +86,12 @@ class TodoItemCreate(BaseModel):
     actualHours: Optional[str] = None
     tags: List[str] = []
 
+class UserProfile(BaseModel):
+    uid: str
+    email: str
+    name: Optional[str] = None
+    photoURL: Optional[str] = None
+
 # Helper functions for Firestore
 def firestore_document_to_dict(doc):
     data = doc.to_dict()
@@ -100,6 +109,11 @@ def firestore_document_to_dict(doc):
 @api_router.get("/")
 async def root():
     return {"message": "Hello from Vercel serverless function with Firebase"}
+
+# Auth endpoint to check authentication status
+@api_router.get("/auth/me", response_model=UserProfile)
+async def get_me(user_data = Depends(get_current_user)):
+    return UserProfile(**user_data)
 
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate, db=Depends(get_db)):
@@ -131,20 +145,22 @@ async def get_status_checks(db=Depends(get_db)):
         logger.error(f"Error getting status checks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Todo API endpoints
+# Protected Todo API endpoints
 @api_router.post("/todos", response_model=TodoItem)
-async def create_todo(todo: TodoItemCreate, db=Depends(get_db)):
+async def create_todo(todo: TodoItemCreate, user_data = Depends(get_current_user), db=Depends(get_db)):
     try:
-        todo_obj = TodoItem(**todo.dict())
-        todo_dict = todo_obj.dict()
+        # Create a todo item with the user's ID
+        todo_dict = todo.dict()
+        todo_obj = TodoItem(userId=user_data["uid"], **todo_dict)
+        todo_data = todo_obj.dict()
         
         # Remove id from dict to let Firestore generate it
-        doc_id = todo_dict.pop('id')
+        doc_id = todo_data.pop('id')
         
         # Store in Firestore with server timestamps
         doc_ref = db.collection('todos').document(doc_id)
         doc_ref.set({
-            **todo_dict,
+            **todo_data,
             'createdAt': firestore.SERVER_TIMESTAMP,
             'updatedAt': firestore.SERVER_TIMESTAMP
         })
@@ -157,17 +173,18 @@ async def create_todo(todo: TodoItemCreate, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/todos", response_model=List[TodoItem])
-async def get_todos(db=Depends(get_db)):
+async def get_todos(user_data = Depends(get_current_user), db=Depends(get_db)):
     try:
-        # Get all todos
-        todos_ref = db.collection('todos').limit(1000).get()
+        # Get todos for the current user only
+        userId = user_data["uid"]
+        todos_ref = db.collection('todos').where("userId", "==", userId).limit(1000).get()
         return [TodoItem(**firestore_document_to_dict(doc)) for doc in todos_ref]
     except Exception as e:
         logger.error(f"Error getting todos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/todos/{todo_id}", response_model=TodoItem)
-async def get_todo(todo_id: str, db=Depends(get_db)):
+async def get_todo(todo_id: str, user_data = Depends(get_current_user), db=Depends(get_db)):
     try:
         # Get todo by ID
         doc_ref = db.collection('todos').document(todo_id)
@@ -175,8 +192,13 @@ async def get_todo(todo_id: str, db=Depends(get_db)):
         
         if not doc.exists:
             raise HTTPException(status_code=404, detail=f"Todo with id {todo_id} not found")
+        
+        # Check if the todo belongs to the current user
+        todo_data = firestore_document_to_dict(doc)
+        if todo_data.get('userId') != user_data["uid"]:
+            raise HTTPException(status_code=403, detail="You don't have permission to access this todo")
             
-        return TodoItem(**firestore_document_to_dict(doc))
+        return TodoItem(**todo_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -184,7 +206,7 @@ async def get_todo(todo_id: str, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.put("/todos/{todo_id}", response_model=TodoItem)
-async def update_todo(todo_id: str, todo: TodoItemCreate, db=Depends(get_db)):
+async def update_todo(todo_id: str, todo: TodoItemCreate, user_data = Depends(get_current_user), db=Depends(get_db)):
     try:
         # Check if document exists
         doc_ref = db.collection('todos').document(todo_id)
@@ -192,6 +214,11 @@ async def update_todo(todo_id: str, todo: TodoItemCreate, db=Depends(get_db)):
         
         if not doc.exists:
             raise HTTPException(status_code=404, detail=f"Todo with id {todo_id} not found")
+        
+        # Check if the todo belongs to the current user
+        todo_data = firestore_document_to_dict(doc)
+        if todo_data.get('userId') != user_data["uid"]:
+            raise HTTPException(status_code=403, detail="You don't have permission to update this todo")
         
         # Update the document
         todo_dict = todo.dict()
@@ -210,7 +237,7 @@ async def update_todo(todo_id: str, todo: TodoItemCreate, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.delete("/todos/{todo_id}")
-async def delete_todo(todo_id: str, db=Depends(get_db)):
+async def delete_todo(todo_id: str, user_data = Depends(get_current_user), db=Depends(get_db)):
     try:
         # Check if document exists
         doc_ref = db.collection('todos').document(todo_id)
@@ -218,6 +245,11 @@ async def delete_todo(todo_id: str, db=Depends(get_db)):
         
         if not doc.exists:
             raise HTTPException(status_code=404, detail=f"Todo with id {todo_id} not found")
+        
+        # Check if the todo belongs to the current user
+        todo_data = firestore_document_to_dict(doc)
+        if todo_data.get('userId') != user_data["uid"]:
+            raise HTTPException(status_code=403, detail="You don't have permission to delete this todo")
         
         # Delete the document
         doc_ref.delete()

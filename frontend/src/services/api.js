@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getAuthToken } from './auth';
 
 // Determine the API base URL based on the environment
 const getApiBaseUrl = () => {
@@ -20,16 +21,45 @@ const apiClient = axios.create({
   timeout: 10000,
 });
 
+// Add an interceptor to attach the auth token to every request
+apiClient.interceptors.request.use(async (config) => {
+  try {
+    const token = await getAuthToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    return config;
+  }
+});
+
 // Error handling wrapper
 const handleApiRequest = async (apiCall) => {
   try {
     return await apiCall();
   } catch (error) {
     console.error('API Error:', error);
+    
+    // Handle authentication errors
+    if (error.response && error.response.status === 401) {
+      // You can redirect to login page or trigger a sign-out here
+      console.error('Authentication error: Please log in again');
+    }
+    
     // If we couldn't reach the API or the API returned an error, throw it
     // so the UI can handle it appropriately
     throw error;
   }
+};
+
+// Authentication API functions
+export const checkAuthStatus = async () => {
+  return handleApiRequest(async () => {
+    const response = await apiClient.get('/auth/me');
+    return response.data;
+  });
 };
 
 // API functions for todos
