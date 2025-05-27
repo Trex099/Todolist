@@ -11,5 +11,8 @@
     { "src": "/(.*\\.(js|css|ico|jpg|png|svg))", "dest": "frontend/$1" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "frontend/index.html" }
-  ]
+  ],
+  "env": {
+    "PYTHONPATH": "/var/task"
+  }
 } 
