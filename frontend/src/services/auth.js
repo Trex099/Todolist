@@ -10,23 +10,36 @@ import {
     sendPasswordResetEmail
 } from 'firebase/auth';
 
-// Firebase configuration - These values should be replaced with your Firebase project's values
+// Firebase configuration - Using hardcoded values for development
+// In production, you should move these to environment variables
 const firebaseConfig = {
-    apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-    authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.REACT_APP_FIREBASE_APP_ID
+    apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyBmTNY9El6JcfSw4Fkyf6ujfSzgq2N-JlM",
+    authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "todo-a124a.firebaseapp.com",
+    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "todo-a124a",
+    storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "todo-a124a.appspot.com",
+    messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "264759958019",
+    appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:264759958019:web:3955a5d96a9675c6ed53b4"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
+// Initialize Firebase with error handling
+let auth;
+let googleProvider;
+
+try {
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+} catch (error) {
+    console.error("Error initializing Firebase:", error);
+}
 
 // Sign in with email and password
 export const loginWithEmailAndPassword = async (email, password) => {
+    if (!auth) {
+        console.error("Firebase not initialized");
+        throw new Error("Firebase not initialized");
+    }
+    
     try {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         return userCredential.user;
@@ -38,6 +51,11 @@ export const loginWithEmailAndPassword = async (email, password) => {
 
 // Sign up with email and password
 export const registerWithEmailAndPassword = async (email, password) => {
+    if (!auth) {
+        console.error("Firebase not initialized");
+        throw new Error("Firebase not initialized");
+    }
+    
     try {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         return userCredential.user;
@@ -49,6 +67,11 @@ export const registerWithEmailAndPassword = async (email, password) => {
 
 // Sign in with Google
 export const signInWithGoogle = async () => {
+    if (!auth || !googleProvider) {
+        console.error("Firebase not initialized");
+        throw new Error("Firebase not initialized");
+    }
+    
     try {
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
@@ -60,6 +83,11 @@ export const signInWithGoogle = async () => {
 
 // Sign out
 export const logout = async () => {
+    if (!auth) {
+        console.error("Firebase not initialized");
+        return true;
+    }
+    
     try {
         await signOut(auth);
         return true;
@@ -71,12 +99,12 @@ export const logout = async () => {
 
 // Get the current authentication state
 export const getCurrentUser = () => {
-    return auth.currentUser;
+    return auth?.currentUser || null;
 };
 
 // Get the auth token for API requests
 export const getAuthToken = async () => {
-    const user = auth.currentUser;
+    const user = auth?.currentUser;
     if (!user) {
         return null;
     }
@@ -86,11 +114,21 @@ export const getAuthToken = async () => {
 
 // Subscribe to auth state changes
 export const onAuthStateChange = (callback) => {
+    if (!auth) {
+        setTimeout(() => callback(null), 0);
+        return () => {};
+    }
+    
     return onAuthStateChanged(auth, callback);
 };
 
 // Send password reset email
 export const resetPassword = async (email) => {
+    if (!auth) {
+        console.error("Firebase not initialized");
+        throw new Error("Firebase not initialized");
+    }
+    
     try {
         await sendPasswordResetEmail(auth, email);
         return true;
@@ -100,4 +138,4 @@ export const resetPassword = async (email) => {
     }
 };
 
-export default auth; 
+export default auth || null; 

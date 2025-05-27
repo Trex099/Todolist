@@ -2,10 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import "./index.css";
-import App from "./App";
 import Login from "./components/Login";
 import { AuthProvider } from "./components/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import TodoApp from "./components/TodoApp";
 
 const AppRouter = () => {
   return (
@@ -18,7 +18,7 @@ const AppRouter = () => {
               path="/" 
               element={
                 <ProtectedRoute>
-                  <App />
+                  <TodoApp />
                 </ProtectedRoute>
               } 
             />
